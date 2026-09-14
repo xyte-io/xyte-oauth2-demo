@@ -25,7 +25,9 @@ function parseCookies(req) {
 // SameSite=Lax does two jobs here. It still sends the cookie on the hub's top-level redirect back to
 // /callback, which is what lets us match the returned `state`; and it is the only thing stopping
 // another site from POSTing to /refresh or /revoke on a visitor's behalf. Relaxing it to None would
-// remove that CSRF defence, so a copy of this code would need real CSRF tokens instead.
+// remove that CSRF defence, so a copy of this code would need real CSRF tokens instead. Over HTTPS
+// this should also carry `Secure` and the `__Host-` prefix — that is what stops an attacker planting
+// a cookie in the first place.
 function setCookie(res, value, extra = '') {
   res.setHeader('Set-Cookie', `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax${extra}`);
 }

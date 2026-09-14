@@ -192,7 +192,7 @@ function tokenRows(session) {
     <tr><th>token_type</th><td class="mono">${escape(tokens.token_type ?? '—')}</td></tr>
     <tr><th>expires_in</th><td class="mono">${escape(tokens.expires_in ?? '—')}</td></tr>
     <tr><th>scope</th><td class="mono">${escape(tokens.scope ?? '— (none granted)')}</td></tr>
-    <tr><th>id_token</th><td class="mono">${tokens.id_token ? escape(truncate(tokens.id_token, 20)) : '— (organization tokens carry no id_token)'}</td></tr>`;
+    <tr><th>id_token</th><td class="mono">${tokens.id_token ? escape(truncate(tokens.id_token, 20)) : '— (none issued)'}</td></tr>`;
 }
 
 const checkList = (checks) => checks
@@ -260,7 +260,9 @@ export function dashboard({ session, probes, userinfoResult, flash }) {
     .map((result) => `<tr>
         <td class="mono">${escape(result.path)}</td>
         <td>${statusPill(result.status)}</td>
-        <td>${escape(result.summary)}<div class="muted small">${escape(result.note ?? '')}</div></td>
+        <td>${escape(result.summary)}
+          ${result.challenge ? `<div class="muted small mono">${escape(result.challenge)}</div>` : ''}
+          <div class="muted small">${escape(result.note ?? '')}</div></td>
       </tr>`)
     .join('');
 

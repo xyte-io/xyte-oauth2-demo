@@ -77,7 +77,9 @@ redirect URIs. There is no dynamic client registration.
   a JWK straight into a public key. RS256 is checked before the key is looked up (accepting the
   header's choice of algorithm is the classic "alg confusion" bug), the `kid` selects the key with no
   fallback to "whichever key came first", and a token that fails **any** check is refused outright
-  rather than displayed — `server.js` → `applyTokens` writes nothing to the session until it passes.
+  rather than displayed. `server.js` → `applyTokens` stores the tokens either way — a rotated refresh
+  token must never be discarded — but accepts no identity from a token that failed: it records the
+  failed checks, and the page says so.
 - **The discovery document is validated before it is used** (`src/oauth.js` → `assertTrustworthy`).
   Its `issuer` must equal `XYTE_HUB` and every endpoint must be on that origin, because this client
   is about to post its `client_secret` to `token_endpoint`. Without that check the `iss` check on the
@@ -99,9 +101,11 @@ redirect URIs. There is no dynamic client registration.
 
 ## This is a demo, not a template for production
 
-Sessions live in a `Map` in memory and disappear on restart, tokens are printed in the browser, and
-everything runs over plain HTTP on localhost. A real integration stores tokens server-side, encrypted
-and per user, and serves the redirect URI over HTTPS.
+Sessions live in a `Map` in memory, are never evicted, and disappear on restart; tokens are printed in
+the browser; everything runs over plain HTTP on localhost. A real integration stores tokens
+server-side, encrypted and per user, expires its sessions, and serves the redirect URI over HTTPS —
+at which point the session cookie should also carry `Secure` and the `__Host-` prefix, which is what
+actually stops an attacker planting a cookie (see the note in `server.js` → `/login`).
 
 ## Files
 

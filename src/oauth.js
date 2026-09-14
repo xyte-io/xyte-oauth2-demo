@@ -256,7 +256,9 @@ export async function verifyIdToken(idToken, { expectedNonce } = {}) {
   if (expectedNonce) {
     checks.push({ label: 'Nonce matches this login', ok: claims.nonce === expectedNonce, detail: claims.nonce ?? '—' });
   } else {
-    checks.push({ label: 'No nonce expected (token came from a refresh)', ok: !claims.nonce, detail: claims.nonce ?? '—' });
+    // OIDC Core §12.2 permits a refreshed id_token to repeat the original nonce; Xyte omits it, so
+    // this row records what Xyte does rather than a requirement of the spec.
+    checks.push({ label: 'No nonce (Xyte omits it on a refresh)', ok: !claims.nonce, detail: claims.nonce ?? '—' });
   }
 
   return { header, claims, checks, valid: checks.every((check) => check.ok) };

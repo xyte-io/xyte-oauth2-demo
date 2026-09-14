@@ -35,15 +35,15 @@ const takeFlash = (session) => {
 // Stores a token response and verifies any id_token in it. Returns null on success, or the failed
 // verification so the caller can show which check rejected the token.
 //
-// The tokens themselves are stored either way. They came back from this client's own authenticated
-// call to a validated token endpoint, and on a refresh the rotated token MUST be kept — the previous
-// one is already dead at the hub, so discarding the new one would leave the session holding a corpse
-// and turn the next refresh into a self-inflicted replay. It is only the identity claims that have to
-// earn their place: claims from an unverified id_token are claims from whoever sent them, and a
-// relying party that renders them has authenticated nobody.
+// The tokens are stored FIRST and unconditionally. They came back from this client's own
+// authenticated call to a validated token endpoint, and on a refresh the rotated token MUST be kept:
+// the previous one is already dead at the hub, so losing the new one — to a failed check, or merely
+// to a JWKS fetch that happens to be down — would leave the session holding a corpse and turn the
+// next refresh into a self-inflicted replay.
+//
+// It is only the identity claims that have to earn their place: claims from an unverified id_token
+// are claims from whoever sent them, and a relying party that renders them has authenticated nobody.
 async function applyTokens(session, tokens, { expectedNonce, keepOldRefresh = false } = {}) {
-  const verified = tokens.id_token ? await verifyIdToken(tokens.id_token, { expectedNonce }) : null;
-
   if (keepOldRefresh && session.tokens?.refresh_token) session.oldRefreshToken = session.tokens.refresh_token;
 
   session.tokens = tokens;
@@ -51,16 +51,26 @@ async function applyTokens(session, tokens, { expectedNonce, keepOldRefresh = fa
   delete session.idTokenChecks;
   delete session.idTokenRejected;
 
-  if (verified?.valid) {
-    session.idTokenClaims = verified.claims;
-    session.idTokenChecks = verified.checks;
-  } else if (verified) {
-    // Remembered so the dashboard says "rejected" rather than silently looking like a flow that
-    // never asked for an identity.
-    session.idTokenRejected = verified.checks;
+  if (!tokens.id_token) return null;
+
+  let verified;
+  try {
+    verified = await verifyIdToken(tokens.id_token, { expectedNonce });
+  } catch (error) {
+    // A verification that could not even run is a verification that did not pass.
+    verified = { valid: false, checks: [{ label: 'Verification could be completed', ok: false, detail: error.message }] };
   }
 
-  return verified && !verified.valid ? verified : null;
+  if (verified.valid) {
+    session.idTokenClaims = verified.claims;
+    session.idTokenChecks = verified.checks;
+    return null;
+  }
+
+  // Remembered so the dashboard says "rejected" rather than silently looking like a flow that never
+  // asked for an identity.
+  session.idTokenRejected = verified.checks;
+  return verified;
 }
 
 function tokenError(result) {
@@ -78,10 +88,14 @@ const routes = {
   'GET /login': async (req, res, session) => {
     const { verifier, challenge } = pkcePair();
 
-    // Rotate BEFORE the one-time values are stored. Rotating only at /callback is too late: an
-    // attacker who can plant a session cookie can start their own login through it, then hand the
-    // victim a callback whose `state` matches — and the victim ends up signed into the attacker's
-    // account (RFC 6819 §4.4.1.9).
+    // Rotate before the one-time values are stored, so a session id that was visible to anyone
+    // before this flow began is already dead by the time it carries a `state` worth stealing.
+    //
+    // Note what this does NOT buy: login CSRF (RFC 6819 §4.4.1.9), where an attacker runs their own
+    // login and then plants the resulting cookie on a victim so the victim signs into the attacker's
+    // account, is not closed by any amount of rotation. Closing it needs a cookie an attacker cannot
+    // plant — `Secure` plus the `__Host-` prefix, over HTTPS — which this demo deliberately does not
+    // have because it runs on plain HTTP.
     rotateSession(session, res);
 
     // One flow at a time per session: starting a second login in another tab abandons the first.
@@ -175,25 +189,25 @@ const routes = {
     }
 
     session.refreshing = true;
-    let result;
     try {
-      result = await refreshTokens(session.tokens.refresh_token);
+      const result = await refreshTokens(session.tokens.refresh_token);
+
+      if (!result.ok || !result.body) {
+        session.flash = { trustedHtml: `Refresh failed: ${tokenError(result)}` };
+        return redirect(res, '/dashboard');
+      }
+
+      const failed = await applyTokens(session, result.body, { keepOldRefresh: true });
+      if (failed) return send(res, 400, idTokenErrorPage(failed));
+
+      session.flash = {
+        trustedHtml: 'Refreshed. The refresh token was rotated — the previous one is now dead and is kept aside for the replay button.'
+      };
+      redirect(res, '/dashboard');
     } finally {
+      // Released only once the new tokens are stored, not merely once the HTTP call returned.
       delete session.refreshing;
     }
-
-    if (!result.ok || !result.body) {
-      session.flash = { trustedHtml: `Refresh failed: ${tokenError(result)}` };
-      return redirect(res, '/dashboard');
-    }
-
-    const failed = await applyTokens(session, result.body, { keepOldRefresh: true });
-    if (failed) return send(res, 400, idTokenErrorPage(failed));
-
-    session.flash = {
-      trustedHtml: 'Refreshed. The refresh token was rotated — the previous one is now dead and is kept aside for the replay button.'
-    };
-    redirect(res, '/dashboard');
   },
 
   'POST /replay': async (req, res, session) => {
@@ -260,8 +274,16 @@ const server = createServer(async (req, res) => {
   }
 });
 
+const problems = configProblems();
+
+// An unusable port has to be caught before listen(), which would otherwise die with a bare
+// ERR_SOCKET_BAD_PORT and never print the message that explains it.
+if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) {
+  console.error(`Cannot start: ${problems.join(' ')}`);
+  process.exit(1);
+}
+
 server.listen(config.port, () => {
-  const problems = configProblems();
   console.log(`${config.appName} demo listening on http://localhost:${config.port}`);
   console.log(`  hub:          ${config.hub}`);
   console.log(`  client_id:    ${config.clientId || '(not set)'}`);

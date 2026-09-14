@@ -55,7 +55,8 @@ export function configProblems() {
   }
   if (!['basic', 'post'].includes(config.authMethod)) problems.push("AUTH_METHOD must be 'basic' or 'post'.");
 
-  // A non-numeric PORT would otherwise surface as a URL parse error on every single request.
+  // Checked here so the message is readable: an unusable PORT otherwise reaches server.listen and
+  // dies as ERR_SOCKET_BAD_PORT.
   if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) {
     problems.push(`PORT (${config.port}) must be a whole number between 1 and 65535.`);
   }
