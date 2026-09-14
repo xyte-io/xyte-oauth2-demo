@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 // A three-line .env reader keeps the demo dependency-free: `git clone && node server.js` has to work
 // on a customer's laptop without an npm install.
@@ -22,14 +23,19 @@ function readDotenv(path) {
   );
 }
 
+// fileURLToPath, not URL#pathname: a checkout under a path with a space would otherwise be handed to
+// readFileSync percent-encoded, and the miss is silent.
+const file = readDotenv(fileURLToPath(new URL('../.env', import.meta.url)));
+
 // Real environment variables win, so `XYTE_HUB=… node server.js` overrides the file for a one-off run.
-const file = readDotenv(new URL('../.env', import.meta.url).pathname);
 const read = (key, fallback) => process.env[key] ?? file[key] ?? fallback;
 
 export const config = {
   hub: read('XYTE_HUB', 'http://localhost:3000').replace(/\/+$/, ''),
-  clientId: read('XYTE_CLIENT_ID', 'acme-demo-client'),
-  clientSecret: read('XYTE_CLIENT_SECRET', 'acme-demo-client-secret'),
+  // Deliberately empty: a placeholder default would make the check below unreachable and leave a
+  // forgotten .env to fail later as an opaque invalid_client from the hub.
+  clientId: read('XYTE_CLIENT_ID', ''),
+  clientSecret: read('XYTE_CLIENT_SECRET', ''),
   redirectUri: read('REDIRECT_URI', 'http://localhost:5555/callback'),
   port: Number(read('PORT', '5555')),
   scope: read('SCOPE', 'openid profile email'),
@@ -37,16 +43,31 @@ export const config = {
   appName: read('APP_NAME', 'Acme Fleet Portal')
 };
 
+const LOCAL_HOSTNAMES = ['localhost', '127.0.0.1', '::1'];
+
 export function configProblems() {
   const problems = [];
+
   if (!/^https?:\/\//.test(config.hub)) problems.push('XYTE_HUB must be an absolute http(s) URL.');
-  if (!config.clientId || !config.clientSecret) problems.push('XYTE_CLIENT_ID and XYTE_CLIENT_SECRET are required.');
+  if (!config.clientId || !config.clientSecret) {
+    problems.push('XYTE_CLIENT_ID and XYTE_CLIENT_SECRET are required — copy .env.example to .env and fill in the credentials Xyte issued you.');
+  }
   if (!['basic', 'post'].includes(config.authMethod)) problems.push("AUTH_METHOD must be 'basic' or 'post'.");
 
-  // A redirect URI whose port differs from the listening port produces an opaque invalid_request at
-  // the hub rather than a routing error here, so it is worth catching before the first round trip.
-  const port = Number(new URL(config.redirectUri).port || 80);
-  if (port !== config.port) problems.push(`REDIRECT_URI port (${port}) does not match PORT (${config.port}).`);
+  let redirect;
+  try {
+    redirect = new URL(config.redirectUri);
+  } catch {
+    problems.push(`REDIRECT_URI (${config.redirectUri}) is not a valid absolute URL.`);
+    return problems;
+  }
+
+  // Worth catching early only when the browser reaches this process directly: a mismatch there
+  // surfaces at the hub as an opaque invalid_request. Behind a proxy or a real hostname the public
+  // port has nothing to do with the port we listen on.
+  if (LOCAL_HOSTNAMES.includes(redirect.hostname) && Number(redirect.port || 80) !== config.port) {
+    problems.push(`REDIRECT_URI port (${redirect.port || 80}) does not match PORT (${config.port}).`);
+  }
 
   return problems;
 }

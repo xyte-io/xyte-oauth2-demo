@@ -96,10 +96,12 @@ const statusPill = (status) => {
   return `<span class="pill ${klass}">${escape(status || 'ERR')}</span>`;
 };
 
+// `trustedHtml` is injected unescaped so the explanations can use <code> and <a>. The name is the
+// warning: every producer in server.js escapes its own interpolations, and any new one must too.
 function flashCard(flash) {
   if (!flash) return '';
 
-  return `<section class="card flash"><h2>Last action</h2><p>${flash.html}</p></section>`;
+  return `<section class="card flash"><h2>Last action</h2><p>${flash.trustedHtml}</p></section>`;
 }
 
 export function landing({ session, problems, flash }) {
@@ -124,12 +126,12 @@ export function landing({ session, problems, flash }) {
         <em>same</em> OAuth2 authorization request — Xyte decides what you get from who signs in and what they pick.</p>
       </section>
       <div class="grid">
-        <a class="choice" href="/login?flow=connect">
+        <a class="choice" href="/login">
           <strong>Connect your organization</strong>
           <span>For an organization administrator. Grants this app access to one organization, with the reach of an
           organization API key. Returns no <code>id_token</code> — nobody is signed in, the organization is connected.</span>
         </a>
-        <a class="choice" href="/login?flow=signin">
+        <a class="choice" href="/login">
           <strong>Sign in with Xyte</strong>
           <span>For a member of an organization that is already connected. Returns an OpenID Connect
           <code>id_token</code> plus a token limited to exactly what that member can see in the Xyte portal.</span>
@@ -197,11 +199,12 @@ function idTokenCard(session) {
 function userinfoCard(userinfoResult) {
   if (!userinfoResult) return '';
 
-  const explanation = userinfoResult.status === 403
-    ? 'Expected for an organization token: <code>/oauth/userinfo</code> describes a person, and this authorization has none.'
-    : userinfoResult.status === 200
-      ? 'The same identity as the <code>id_token</code>, fetched live from Xyte.'
-      : '';
+  const explanation = {
+    200: 'The same identity as the <code>id_token</code>, fetched live from Xyte.',
+    401: 'The token was rejected — expired, revoked, or killed by a refresh-token replay. Not a scope problem.',
+    403: `<code>insufficient_scope</code>: this authorization has no person to describe. That is the normal answer for an
+          organization token, and also for a user token whose authorization never requested the <code>openid</code> scope.`
+  }[userinfoResult.status] ?? '';
 
   return `<section class="card">
     <h2>GET /oauth/userinfo ${statusPill(userinfoResult.status)}</h2>
@@ -257,6 +260,30 @@ export function dashboard({ session, probes, userinfoResult, flash }) {
         treated as a retried lost response and only fails; replaying it later is treated as theft and revokes the whole
         grant. Revoking here kills this app's tokens but leaves the authorization in place.</p>
       </section>`
+  });
+}
+
+// Shown instead of the dashboard when an id_token fails any check. The claims are deliberately not
+// rendered anywhere on this page: they have not been proven to come from Xyte.
+export function idTokenErrorPage(verified) {
+  const checks = verified.checks
+    .map((check) => `<li><span class="mark ${check.ok ? 'ok' : 'bad'}">${check.ok ? '✓' : '✕'}</span>
+        <span>${escape(check.label)} <span class="muted small mono">${escape(check.detail ?? '')}</span></span></li>`)
+    .join('');
+
+  return layout({
+    title: `${config.appName} — id_token rejected`,
+    body: `
+      <section class="card banner">
+        <h3>The id_token failed verification</h3>
+        <p>Nobody was signed in. An <code>id_token</code> that fails any of these checks proves nothing, so its claims
+        are discarded rather than displayed.</p>
+      </section>
+      <section class="card">
+        <h2>Checks</h2>
+        <ul class="checks">${checks}</ul>
+      </section>
+      <section class="card"><a class="btn" href="/">Start over</a></section>`
   });
 }
 

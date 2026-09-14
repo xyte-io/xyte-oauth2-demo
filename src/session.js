@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 const COOKIE = 'xyte_demo_sid';
 
 // In-memory only: restarting the demo signs everyone out, which is exactly what you want while
-// stepping through the flows. A real vendor app would persist this server-side.
+// stepping through the flows. A real vendor app persists this server-side, per user, and expires it.
 const sessions = new Map();
 
 function parseCookies(req) {
@@ -19,18 +19,34 @@ function parseCookies(req) {
   );
 }
 
+// SameSite=Lax does two jobs here. It still sends the cookie on the hub's top-level redirect back to
+// /callback, which is what lets us match the returned `state`; and it is the only thing stopping
+// another site from POSTing to /refresh or /revoke on a visitor's behalf. Relaxing it to None would
+// remove that CSRF defence, so a copy of this code would need real CSRF tokens instead.
+function setCookie(res, value, extra = '') {
+  res.setHeader('Set-Cookie', `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax${extra}`);
+}
+
+const newId = () => randomBytes(18).toString('base64url');
+
 export function loadSession(req, res) {
   const existing = parseCookies(req)[COOKIE];
   if (existing && sessions.has(existing)) return sessions.get(existing);
 
-  const id = randomBytes(18).toString('base64url');
-  const session = { id };
-  sessions.set(id, session);
-
-  // SameSite=Lax still sends the cookie on the hub's top-level redirect back to /callback, which is
-  // what lets us match the returned `state` against the one we stored.
-  res.setHeader('Set-Cookie', `${COOKIE}=${id}; Path=/; HttpOnly; SameSite=Lax`);
+  const session = { id: newId() };
+  sessions.set(session.id, session);
+  setCookie(res, session.id);
   return session;
+}
+
+// A session id that existed before the user signed in must not still be valid afterwards, or anyone
+// who managed to plant that cookie inherits the login. Rotating on every privilege change — sign-in
+// and sign-out — is the standard defence against session fixation.
+export function rotateSession(session, res) {
+  sessions.delete(session.id);
+  session.id = newId();
+  sessions.set(session.id, session);
+  setCookie(res, session.id);
 }
 
 export function clearSession(session) {

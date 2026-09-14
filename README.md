@@ -26,6 +26,10 @@ from who signs in and what they pick.
 | `/oauth/userinfo` | `403 insufficient_scope` | `200` |
 | Admin-only endpoints (`users`, `groups`) | `200` | `403 Not authorized` |
 
+The right-hand column assumes the default `SCOPE`. Drop `openid` from it and even a member gets no
+`id_token` and a `403 insufficient_scope` from userinfo, which is correct — this application asked for
+neither.
+
 A member of an organization **no administrator has connected yet** reaches a dead end on the consent
 screen asking them to have their administrator connect the application first. The administrator has
 to go first; that is the whole model in one sentence.
@@ -69,7 +73,14 @@ redirect URIs. There is no dynamic client registration.
   credentials go in HTTP Basic (both halves form-url-encoded first, per RFC 6749 §2.3.1) or in the
   body; `src/oauth.js` → `postForm` does both.
 - **`id_token` verification** (`src/oauth.js` → `verifyIdToken`) uses Node's built-in `crypto` to turn
-  a JWK straight into a public key. RS256, and the `kid` in the header picks the key.
+  a JWK straight into a public key. RS256 is checked before the key is looked up (accepting the
+  header's choice of algorithm is the classic "alg confusion" bug), the `kid` selects the key with no
+  fallback to "whichever key came first", and a token that fails **any** check is refused outright
+  rather than displayed — `server.js` → `applyTokens` writes nothing to the session until it passes.
+- **The discovery document is validated before it is used** (`src/oauth.js` → `assertTrustworthy`).
+  Its `issuer` must equal `XYTE_HUB` and every endpoint must be on that origin, because this client
+  is about to post its `client_secret` to `token_endpoint`. Without that check the `iss` check on the
+  `id_token` is circular.
 - **Refresh tokens rotate.** The old one is dead immediately. Replaying it within 60 seconds is read
   as a client retrying a lost response and merely fails; replaying it later is read as a stolen token
   and revokes the entire grant. Store the new refresh token before you do anything else with it.

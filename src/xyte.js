@@ -28,7 +28,10 @@ function summarize(body) {
 export async function probe(path, accessToken) {
   try {
     const response = await fetch(`${config.hub}${path}`, {
-      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+      // Bounded like every other call: five probes run in parallel on each dashboard render, and a
+      // stalled hub would otherwise hang the page indefinitely.
+      signal: AbortSignal.timeout(10_000)
     });
     const text = await response.text();
 
