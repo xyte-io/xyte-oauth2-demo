@@ -4,11 +4,11 @@ import { config } from './config.js';
 // answers all of them; a member token is narrowed to that member's own access and 403s on the
 // administrator-only ones.
 export const PROBES = [
-  { path: '/core/v1/organization/info', note: 'Organization profile — both flows can read it.' },
-  { path: '/core/v1/organization/devices?per_page=50', note: 'An organization token sees every device; a member token sees only the devices shared with them.' },
-  { path: '/core/v1/organization/spaces', note: 'Same narrowing as devices.' },
-  { path: '/core/v1/organization/users', note: 'Administrator-only — 403 "Not authorized" for a member token.' },
-  { path: '/core/v1/organization/groups', note: 'Administrator-only — 403 "Not authorized" for a member token.' }
+  { path: '/core/v1/organization/info', note: 'The organization this token acts on.' },
+  { path: '/core/v1/organization/devices?per_page=50', note: 'Every device in the organization — the token is not narrowed to whoever signed in.' },
+  { path: '/core/v1/organization/spaces', note: 'Every space in the organization, for the same reason.' },
+  { path: '/core/v1/organization/users', note: 'Administrator-only in the portal. This token reaches it whoever signed in.' },
+  { path: '/core/v1/organization/groups', note: 'Administrator-only in the portal. This token reaches it whoever signed in.' }
 ];
 
 function summarize(body) {

@@ -240,19 +240,28 @@ const routes = {
     const result = await revokeToken(session.tokens.access_token);
     session.flash = {
       trustedHtml: `<code>POST /oauth/revoke</code> answered HTTP ${result.status} with an empty body — RFC 7009 says a revocation
-             endpoint must not reveal whether the token existed. The tokens of this authorization are dead, so the probes
-             below now answer 401. The authorization itself survives: signing in again issues new tokens without asking
-             the administrator to approve anything.`
+             endpoint must not reveal whether the token existed. Both tokens this app was holding are dead, so the probes
+             below now answer 401. Nothing else changed: this app's own session is still open, and the organization is
+             still connected — signing in again issues fresh tokens without asking an administrator to approve anything.
+             Withdrawing that approval is done in Xyte, under Settings → Connected apps.`
     };
 
     redirect(res, '/dashboard');
   },
 
   'POST /logout': async (req, res, session) => {
+    // What a real application does on sign-out: drop its own session AND hand the tokens back, so no
+    // live credential outlives the session that needed it. Revoking first — clearSession drops the tokens.
+    const revoked = session.tokens?.access_token ? await revokeToken(session.tokens.access_token) : null;
+
     clearSession(session);
     // Rotate on sign-out too, so the id that was tied to an identity cannot be presented again.
     rotateSession(session, res);
-    session.flash = { trustedHtml: 'Signed out of this demo only. The authorization at Xyte is untouched — use Revoke for that.' };
+    session.flash = {
+      trustedHtml: `Signed out of this demo${revoked ? ', and the tokens it was holding were revoked at Xyte' : ''}. The
+             organization's approval is untouched — that is the customer's to withdraw, in Xyte under
+             Settings → Connected apps.`
+    };
     redirect(res, '/');
   },
 

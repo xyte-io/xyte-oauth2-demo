@@ -122,19 +122,17 @@ export function landing({ session, problems, flash }) {
       ${current}
       <section class="card">
         <h2>What this is</h2>
-        <p>A third-party application that reads devices from Xyte on your behalf. Both buttons below start the
-        <em>same</em> OAuth2 authorization request — Xyte decides what you get from who signs in and what they pick.</p>
+        <p>A third-party application that reads devices from Xyte on your behalf. Signing in and authorizing are
+        one flow: Xyte authenticates you, you choose which organization this app should act on, and the app comes
+        back holding both an identity for you and a token to call the API with.</p>
       </section>
       <div class="grid">
         <a class="choice" href="/login">
-          <strong>Connect your organization</strong>
-          <span>For an organization administrator. Grants this app access to one organization, with the reach of an
-          organization API key. Returns no <code>id_token</code> — nobody is signed in, the organization is connected.</span>
-        </a>
-        <a class="choice" href="/login">
           <strong>Sign in with Xyte</strong>
-          <span>For a member of an organization that is already connected. Returns an OpenID Connect
-          <code>id_token</code> plus a token limited to exactly what that member can see in the Xyte portal.</span>
+          <span>Xyte lists every organization you can reach and marks each one: already approved by an administrator,
+          yours to approve, or waiting on an administrator. Whichever you pick, this app receives an OpenID Connect
+          <code>id_token</code> naming who signed in, plus an access token with the reach of an organization API key
+          &mdash; the same token for an administrator and for a member.</span>
         </a>
       </div>
       <section class="card">
@@ -168,7 +166,8 @@ function subheading(session) {
   const claims = session.idTokenClaims;
   if (claims) {
     return `Tenant <code>${escape(claims.xyte_tenant_id ?? '')}</code> (${escape(claims.xyte_tenant_type ?? '')}).
-            This token carries this member's own access — nothing more.`;
+            The <code>id_token</code> says who signed in; the access token carries organization-wide access,
+            independent of it.`;
   }
 
   if (session.idTokenRejected) {
@@ -294,12 +293,19 @@ export function dashboard({ session, probes, userinfoResult, flash }) {
         <div class="actions">
           <form method="post" action="/refresh"><button class="primary" type="submit">Refresh token</button></form>
           <form method="post" action="/replay"><button type="submit"${session.oldRefreshToken ? '' : ' disabled'}>Replay the old refresh token</button></form>
-          <form method="post" action="/revoke"><button type="submit">Revoke (vendor side)</button></form>
+          <form method="post" action="/revoke"><button type="submit">Revoke these tokens</button></form>
           <form method="post" action="/logout"><button type="submit">Sign out of this demo</button></form>
         </div>
         <p class="muted small">Refreshing rotates the refresh token. Replaying the rotated one within 60 seconds is
         treated as a retried lost response and only fails; replaying it later is treated as theft and revokes the whole
-        grant. Revoking here kills this app's tokens but leaves the authorization in place.</p>
+        grant.</p>
+        <p class="muted small"><strong>Revoking these tokens</strong> is credential hygiene, not a disconnect: it calls
+        <code>POST /oauth/revoke</code> so the access and refresh tokens this app is holding stop working immediately,
+        instead of being left alive for their remaining 60 minutes and 90 days. It does not end this app's own session,
+        and it does not withdraw the organization's approval &mdash; signing in again issues fresh tokens without asking
+        an administrator. Withdrawing the approval is the customer's decision and is made in Xyte, under
+        <em>Settings &rarr; Connected apps</em>. Signing out below does both halves of what a real application does:
+        drops its own session and revokes the tokens it was holding.</p>
       </section>`
   });
 }

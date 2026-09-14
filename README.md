@@ -12,27 +12,38 @@ cp .env.example .env      # fill in the client_id / client_secret Xyte issued yo
 node server.js            # http://localhost:5555
 ```
 
-## The two flows
+## The flow
 
-Both buttons on the landing page send the *same* authorization request. Xyte decides what comes back
-from who signs in and what they pick.
+There is one flow and it is the same for everybody. The application sends an authorization request,
+Xyte authenticates the person, and Xyte then lists every organization that person can reach, marking
+each one:
 
-| | **Connect your organization** | **Sign in with Xyte** |
+| On the consent screen | What it means | Picking it |
 |---|---|---|
-| Who does it | An organization administrator | Any member of an organization that is already connected |
-| What is authorized | The organization | That one person |
-| Access token reach | The whole organization, like an organization API key | Exactly what that member can see in the Xyte portal |
-| `id_token` | None — nobody signed in | Yes: `sub`, `email`, `name`, `xyte_tenant_id`, `xyte_tenant_type` |
-| `/oauth/userinfo` | `403 insufficient_scope` | `200` |
-| Admin-only endpoints (`users`, `groups`) | `200` | `403 Not authorized` |
+| **Approved by tenant administrator** | An administrator has already connected this application | Straight back to the application — nothing to approve |
+| *Available to approve* | The person administers that organization | They approve, then back to the application |
+| **Requires administrator approval** | Neither of the above | Not selectable; an administrator has to go first |
 
-The right-hand column assumes the default `SCOPE`. Drop `openid` from it and even a member gets no
-`id_token` and a `403 insufficient_scope` from userinfo, which is correct — this application asked for
-neither.
+Whichever organization is picked, the token response is the same:
 
-A member of an organization **no administrator has connected yet** reaches a dead end on the consent
-screen asking them to have their administrator connect the application first. The administrator has
-to go first; that is the whole model in one sentence.
+| | |
+|---|---|
+| What is authorized | The organization |
+| Access token reach | The whole organization, like an organization API key |
+| `id_token` | `sub`, `email`, `name`, `xyte_tenant_id`, `xyte_tenant_type` |
+| `/oauth/userinfo` | `200`, describing the person who signed in |
+| Admin-only endpoints (`users`, `groups`) | `200` |
+
+**Identity and authority are deliberately separate.** The `id_token` and `/oauth/userinfo` say *who
+signed in*. The access token carries *what the organization granted*, and it is identical whether an
+administrator or an ordinary member obtained it — signing in as a member of an already-connected
+organization yields exactly the same access as the administrator's own sign-in.
+
+That is the whole model in one sentence: a person's sign-in is how the application obtains an
+organization token, not a limit on what that token can do.
+
+This assumes the default `SCOPE`. Drop `openid` from it and there is no `id_token` and userinfo
+answers `403 insufficient_scope`, which is correct — this application asked for neither.
 
 ## Configuration
 
@@ -54,16 +65,19 @@ redirect URIs. There is no dynamic client registration.
 
 ## What the pages show
 
-- **`/`** — the two entry points, plus the client configuration in use.
+- **`/`** — the entry point, plus the client configuration in use.
 - **`/dashboard`** — the raw token response, the `id_token` claims with every verification check
   listed separately (signature against the JWKS key, issuer, audience, expiry, nonce), the live
-  `/oauth/userinfo` response, and five Organization Core API calls with their status codes. Switching
-  between the two flows and comparing this table is the fastest way to understand the difference.
+  `/oauth/userinfo` response, and five Organization Core API calls with their status codes. Signing in
+  to different organizations, and as different people, and comparing this table is the fastest way to
+  see that the token's reach never depends on who signed in.
 - **`/discovery`** — `/.well-known/openid-configuration` and the JWKS, which is nearly everything a
   client needs to discover Xyte. The exception is the revocation endpoint: Xyte does not advertise a
   `revocation_endpoint` yet, so that one URL is built from `XYTE_HUB`.
-- Buttons for **refresh**, **replaying a rotated refresh token**, and **revoking**, each explaining
-  what Xyte did in response.
+- Buttons for **refresh**, **replaying a rotated refresh token**, **revoking the tokens this app
+  holds**, and **signing out** (which revokes them too, the way a real application should), each
+  explaining what Xyte did in response. Revoking tokens is not a disconnect: the organization stays
+  connected, and withdrawing that approval is done in Xyte under *Settings → Connected apps*.
 
 ## What it demonstrates, and what to copy
 
