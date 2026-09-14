@@ -1,0 +1,15 @@
+{
+  "name": "xyte-oauth2-demo",
+  "version": "1.0.0",
+  "description": "A runnable sample vendor application that authenticates against Xyte with OAuth2 / OpenID Connect.",
+  "type": "module",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "license": "UNLICENSED"
+}
