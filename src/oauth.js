@@ -3,6 +3,7 @@ import { config } from './config.js';
 
 const TIMEOUT_MS = 10_000;
 const JWKS_CACHE_MS = 5 * 60 * 1000;
+const DISCOVERY_CACHE_MS = 60 * 60 * 1000;
 // The expiry and issued-at checks run against the customer's laptop clock, not Xyte's, so a minute
 // of drift must not reject a freshly issued token.
 const CLOCK_SKEW_SECONDS = 60;
@@ -34,7 +35,7 @@ export function pkcePair() {
 
 export const randomToken = () => b64url(randomBytes(24));
 
-let discoveryCache = null;
+let discoveryCache = { document: null, fetchedAt: 0 };
 
 // OpenID Connect Discovery §4.3: the document's `issuer` MUST equal the issuer it was fetched from,
 // and the endpoints it names must belong to that issuer — this client is about to post its
@@ -53,16 +54,21 @@ function assertTrustworthy(document) {
   }
 }
 
+// Xyte marks the document cacheable for an hour; caching it forever would mean a long-running
+// integration never notices an endpoint move.
 export async function discovery() {
-  if (discoveryCache) return discoveryCache;
+  if (discoveryCache.document && Date.now() - discoveryCache.fetchedAt < DISCOVERY_CACHE_MS) {
+    return discoveryCache.document;
+  }
 
   const response = await request(`${config.hub}/.well-known/openid-configuration`);
   if (!response.ok) throw new Error(`Discovery failed: HTTP ${response.status} from ${config.hub}`);
 
   const document = await response.json();
+  // Throws before anything is cached, so a rejected document cannot poison later calls.
   assertTrustworthy(document);
-  discoveryCache = document;
-  return discoveryCache;
+  discoveryCache = { document, fetchedAt: Date.now() };
+  return document;
 }
 
 let jwksCache = { keys: null, fetchedAt: 0 };
@@ -172,6 +178,11 @@ export async function verifyIdToken(idToken, { expectedNonce } = {}) {
     if (parts.length !== 3) throw new Error('expected three dot-separated segments');
     header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
     claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    // `JSON.parse('null')` and `JSON.parse('7')` both succeed, and every check below would then
+    // throw on property access instead of reporting a rejection.
+    if (!header || typeof header !== 'object' || !claims || typeof claims !== 'object') {
+      throw new Error('header and payload must both be JSON objects');
+    }
   } catch (error) {
     return failedVerification('id_token is a well-formed JWS', error.message);
   }
@@ -185,8 +196,10 @@ export async function verifyIdToken(idToken, { expectedNonce } = {}) {
   checks.push({ label: 'Header alg is RS256', ok: header.alg === 'RS256', detail: header.alg ?? '—' });
 
   let keys = await jwks();
-  let jwk = keys.find((key) => key.kid === header.kid);
-  if (!jwk) {
+  let jwk = header.kid ? keys.find((key) => key.kid === header.kid) : undefined;
+  // Only a token naming a key we do not know is worth a refetch — that is what a key rotation looks
+  // like. A token with no `kid` at all would otherwise refetch on every attempt.
+  if (!jwk && header.kid) {
     keys = await jwks({ refresh: true });
     jwk = keys.find((key) => key.kid === header.kid);
   }
@@ -216,9 +229,10 @@ export async function verifyIdToken(idToken, { expectedNonce } = {}) {
     detail: audiences.filter(Boolean).join(', ') || '—'
   });
 
-  // OIDC Core 3.1.3.7 only requires `azp` to be checked when the token was issued to more than one
-  // audience. Xyte issues a single one today, so this row normally does not appear.
-  if (audiences.length > 1) {
+  // OIDC Core 3.1.3.7: `azp` is required when the token has several audiences (rule 5), and whenever
+  // it is present at all it MUST equal the client id (rule 6). Xyte issues one audience and no `azp`
+  // today, so this row normally does not appear.
+  if (audiences.length > 1 || claims.azp !== undefined) {
     checks.push({ label: `azp is ${config.clientId}`, ok: claims.azp === config.clientId, detail: claims.azp ?? '—' });
   }
 
@@ -231,7 +245,10 @@ export async function verifyIdToken(idToken, { expectedNonce } = {}) {
   checks.push({
     label: 'Issued in the past',
     ok: typeof claims.iat === 'number' && claims.iat <= now + CLOCK_SKEW_SECONDS,
-    detail: typeof claims.iat === 'number' ? new Date(claims.iat * 1000).toISOString() : 'no iat claim'
+    // `toISOString` throws beyond ±8.64e15 ms, and `typeof 1e300 === 'number'`.
+    detail: Number.isFinite(claims.iat) && Math.abs(claims.iat) < 8.64e12
+      ? new Date(claims.iat * 1000).toISOString()
+      : String(claims.iat ?? 'no iat claim')
   });
 
   // A refreshed id_token carries no nonce by design, so the check is only meaningful right after the

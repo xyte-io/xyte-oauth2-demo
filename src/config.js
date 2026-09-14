@@ -44,6 +44,7 @@ export const config = {
 };
 
 const LOCAL_HOSTNAMES = ['localhost', '127.0.0.1', '::1'];
+const KNOWN_SCOPES = ['openid', 'profile', 'email'];
 
 export function configProblems() {
   const problems = [];
@@ -53,6 +54,18 @@ export function configProblems() {
     problems.push('XYTE_CLIENT_ID and XYTE_CLIENT_SECRET are required — copy .env.example to .env and fill in the credentials Xyte issued you.');
   }
   if (!['basic', 'post'].includes(config.authMethod)) problems.push("AUTH_METHOD must be 'basic' or 'post'.");
+
+  // A non-numeric PORT would otherwise surface as a URL parse error on every single request.
+  if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) {
+    problems.push(`PORT (${config.port}) must be a whole number between 1 and 65535.`);
+  }
+
+  // Xyte answers an unknown scope with invalid_scope after a browser round trip; catching it here
+  // saves the reader that detour.
+  const unknownScopes = config.scope.split(/\s+/).filter((scope) => scope && !KNOWN_SCOPES.includes(scope));
+  if (unknownScopes.length) {
+    problems.push(`SCOPE contains ${unknownScopes.join(', ')} — Xyte accepts only ${KNOWN_SCOPES.join(', ')}.`);
+  }
 
   let redirect;
   try {

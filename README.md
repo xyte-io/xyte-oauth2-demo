@@ -41,8 +41,8 @@ Every value can come from `.env` or from a real environment variable (the enviro
 | Variable | Default | Notes |
 |---|---|---|
 | `XYTE_HUB` | `http://localhost:3000` | Base URL, no trailing slash. Production: `https://hub.xyte.io` |
-| `XYTE_CLIENT_ID` | `acme-demo-client` | Issued by Xyte |
-| `XYTE_CLIENT_SECRET` | `acme-demo-client-secret` | Issued by Xyte |
+| `XYTE_CLIENT_ID` | *(none — required)* | Issued by Xyte |
+| `XYTE_CLIENT_SECRET` | *(none — required)* | Issued by Xyte |
 | `REDIRECT_URI` | `http://localhost:5555/callback` | Must match a registered URI **byte for byte** |
 | `PORT` | `5555` | Keep in sync with `REDIRECT_URI` |
 | `SCOPE` | `openid profile email` | Subset of those three |
@@ -59,8 +59,9 @@ redirect URIs. There is no dynamic client registration.
   listed separately (signature against the JWKS key, issuer, audience, expiry, nonce), the live
   `/oauth/userinfo` response, and five Organization Core API calls with their status codes. Switching
   between the two flows and comparing this table is the fastest way to understand the difference.
-- **`/discovery`** — `/.well-known/openid-configuration` and the JWKS, which is everything a client
-  needs to discover Xyte. Nothing else is hard-coded.
+- **`/discovery`** — `/.well-known/openid-configuration` and the JWKS, which is nearly everything a
+  client needs to discover Xyte. The exception is the revocation endpoint: Xyte does not advertise a
+  `revocation_endpoint` yet, so that one URL is built from `XYTE_HUB`.
 - Buttons for **refresh**, **replaying a rotated refresh token**, and **revoking**, each explaining
   what Xyte did in response.
 
@@ -83,15 +84,18 @@ redirect URIs. There is no dynamic client registration.
   `id_token` is circular.
 - **Refresh tokens rotate.** The old one is dead immediately. Replaying it within 60 seconds is read
   as a client retrying a lost response and merely fails; replaying it later is read as a stolen token
-  and revokes the entire grant. Store the new refresh token before you do anything else with it.
+  and revokes the entire grant. Store the new refresh token before you do anything else with it —
+  including when something else about the response looks wrong. For the same reason, serialise
+  refreshes per grant: two concurrent refreshes make the second one a replay of the first.
 - **Revocation** (RFC 7009) always answers `200` with an empty body, even for a token that never
   existed. It kills the tokens, not the authorization: signing in again issues new ones without
   asking the administrator to approve anything. Only the customer-side revoke in
   Settings → Connected apps tears down the authorization itself.
 - **Lifetimes**: authorization codes 60 s and single use, access tokens 60 min, refresh tokens 90 days
   from the first exchange (absolute, not sliding).
-- **Rate limits**: 60/min per IP on `/oauth/token` and `/oauth/revoke`, 120/min on the discovery,
-  JWKS and userinfo endpoints. Polling any of them in a tight loop will return `429`.
+- **Rate limits**: `/oauth/token` is 60/min per IP *and* 300/min per `client_id`; `/oauth/revoke` is
+  60/min per IP; discovery, JWKS and userinfo are 120/min per IP. Polling any of them in a tight loop
+  returns `429` with no `Retry-After`.
 
 ## This is a demo, not a template for production
 

@@ -32,31 +32,35 @@ const takeFlash = (session) => {
   return flash;
 };
 
-// Stores a token response, but only after any id_token in it has been verified. Returns null on
-// success, or the failed verification so the caller can show which check rejected the token.
+// Stores a token response and verifies any id_token in it. Returns null on success, or the failed
+// verification so the caller can show which check rejected the token.
 //
-// Nothing is written to the session before that decision: claims from an unverified id_token are
-// claims from whoever sent it, and a relying party that renders them has authenticated nobody.
+// The tokens themselves are stored either way. They came back from this client's own authenticated
+// call to a validated token endpoint, and on a refresh the rotated token MUST be kept — the previous
+// one is already dead at the hub, so discarding the new one would leave the session holding a corpse
+// and turn the next refresh into a self-inflicted replay. It is only the identity claims that have to
+// earn their place: claims from an unverified id_token are claims from whoever sent them, and a
+// relying party that renders them has authenticated nobody.
 async function applyTokens(session, tokens, { expectedNonce, keepOldRefresh = false } = {}) {
-  let verified = null;
-
-  if (tokens.id_token) {
-    verified = await verifyIdToken(tokens.id_token, { expectedNonce });
-    if (!verified.valid) return verified;
-  }
+  const verified = tokens.id_token ? await verifyIdToken(tokens.id_token, { expectedNonce }) : null;
 
   if (keepOldRefresh && session.tokens?.refresh_token) session.oldRefreshToken = session.tokens.refresh_token;
 
   session.tokens = tokens;
   delete session.idTokenClaims;
   delete session.idTokenChecks;
+  delete session.idTokenRejected;
 
-  if (verified) {
+  if (verified?.valid) {
     session.idTokenClaims = verified.claims;
     session.idTokenChecks = verified.checks;
+  } else if (verified) {
+    // Remembered so the dashboard says "rejected" rather than silently looking like a flow that
+    // never asked for an identity.
+    session.idTokenRejected = verified.checks;
   }
 
-  return null;
+  return verified && !verified.valid ? verified : null;
 }
 
 function tokenError(result) {
@@ -73,6 +77,12 @@ const routes = {
   // and the dashboard says so by reading the token response rather than a local flag.
   'GET /login': async (req, res, session) => {
     const { verifier, challenge } = pkcePair();
+
+    // Rotate BEFORE the one-time values are stored. Rotating only at /callback is too late: an
+    // attacker who can plant a session cookie can start their own login through it, then hand the
+    // victim a callback whose `state` matches — and the victim ends up signed into the attacker's
+    // account (RFC 6819 §4.4.1.9).
+    rotateSession(session, res);
 
     // One flow at a time per session: starting a second login in another tab abandons the first.
     session.state = randomToken();
@@ -117,21 +127,27 @@ const routes = {
     }
 
     const result = await exchangeCode({ code, verifier: codeVerifier });
-    if (!result.ok) {
+    if (!result.ok || !result.body) {
       return send(res, 200, errorPage({
         error: result.body?.error ?? `http_${result.status}`,
-        description: result.body?.error_description ?? result.raw,
+        description: result.body?.error_description ?? result.raw ?? 'The token endpoint returned no usable body.',
         state: returnedState,
         expectedState
       }));
     }
 
     const failed = await applyTokens(session, result.body, { expectedNonce: nonce });
-    if (failed) return send(res, 400, idTokenErrorPage(failed));
+    if (failed) {
+      // At the start of a flow there is no rotated refresh token worth keeping, so the session goes
+      // back to empty rather than holding a half-finished login.
+      clearSession(session);
+      rotateSession(session, res);
+      return send(res, 400, idTokenErrorPage(failed));
+    }
 
     delete session.oldRefreshToken;
-    // The session id existed before this sign-in, so it is replaced now that the session carries an
-    // identity (session fixation).
+    // Rotate again now that the session carries an identity: the id that was handed out before the
+    // sign-in must not stay valid after it (session fixation).
     rotateSession(session, res);
     redirect(res, '/dashboard');
   },
@@ -150,8 +166,23 @@ const routes = {
   'POST /refresh': async (req, res, session) => {
     if (!session.tokens?.refresh_token) return redirect(res, '/');
 
-    const result = await refreshTokens(session.tokens.refresh_token);
-    if (!result.ok) {
+    // Rotation makes a refresh non-idempotent, so two in flight at once means the second one replays
+    // a token the first has already rotated away — a double-click would revoke the grant. A real
+    // client serialises refreshes per grant for exactly this reason.
+    if (session.refreshing) {
+      session.flash = { trustedHtml: 'A refresh is already in flight. Rotation makes concurrent refreshes a self-inflicted replay, so this one was dropped.' };
+      return redirect(res, '/dashboard');
+    }
+
+    session.refreshing = true;
+    let result;
+    try {
+      result = await refreshTokens(session.tokens.refresh_token);
+    } finally {
+      delete session.refreshing;
+    }
+
+    if (!result.ok || !result.body) {
       session.flash = { trustedHtml: `Refresh failed: ${tokenError(result)}` };
       return redirect(res, '/dashboard');
     }
@@ -204,15 +235,21 @@ const routes = {
 };
 
 const server = createServer(async (req, res) => {
-  const url = new URL(req.url, `http://localhost:${config.port}`);
-  const handler = routes[`${req.method} ${url.pathname}`];
-
-  if (!handler) return send(res, 404, layout({ title: 'Not found', body: '<section class="card"><h2>404</h2><a class="btn" href="/">Back</a></section>' }));
-
+  // Everything is inside the try: this callback is async, so anything thrown outside it becomes an
+  // unhandled rejection, which by default takes the whole process down.
   try {
+    // A constant base — only the pathname and the query are used, never the host.
+    const url = new URL(req.url, 'http://localhost');
+    const handler = routes[`${req.method} ${url.pathname}`];
+
+    if (!handler) return send(res, 404, layout({ title: 'Not found', body: '<section class="card"><h2>404</h2><a class="btn" href="/">Back</a></section>' }));
+
     const session = loadSession(req, res);
     await handler(req, res, session, url);
   } catch (error) {
+    // A handler that already started its response cannot be given an error page on top of it.
+    if (res.headersSent) return res.end();
+
     send(res, 500, layout({
       title: 'Error',
       body: `<section class="card"><h2>Something went wrong</h2><pre>${escape(error.stack ?? error.message)}</pre>

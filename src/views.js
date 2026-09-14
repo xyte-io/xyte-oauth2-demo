@@ -151,11 +151,36 @@ export function landing({ session, problems, flash }) {
   });
 }
 
+const OPENID_REQUESTED = config.scope.split(/\s+/).includes('openid');
+
+// Only an id_token proves who is signed in. Without `openid` in the scope Xyte asserts no identity at
+// all, so an absent id_token stops being evidence of anything and the page must not pretend otherwise.
 function headline(session) {
   const claims = session.idTokenClaims;
-  if (!claims) return 'Connected as an organization';
+  if (claims) return `Signed in as ${claims.name ?? claims.sub}${claims.email ? ` (${claims.email})` : ''}`;
+  if (session.idTokenRejected) return 'Signed in as nobody — the id_token was rejected';
+  if (!OPENID_REQUESTED) return 'Connected';
 
-  return `Signed in as ${claims.name ?? claims.sub}${claims.email ? ` (${claims.email})` : ''}`;
+  return 'Connected as an organization';
+}
+
+function subheading(session) {
+  const claims = session.idTokenClaims;
+  if (claims) {
+    return `Tenant <code>${escape(claims.xyte_tenant_id ?? '')}</code> (${escape(claims.xyte_tenant_type ?? '')}).
+            This token carries this member's own access — nothing more.`;
+  }
+
+  if (session.idTokenRejected) {
+    return 'The token response was kept, but its <code>id_token</code> failed verification, so no identity was accepted from it.';
+  }
+
+  if (!OPENID_REQUESTED) {
+    return `This app did not request the <code>openid</code> scope, so Xyte asserted no identity and there is no way to tell
+            from here which flow ran. The probe table below shows what this token actually reaches.`;
+  }
+
+  return 'This app now holds an organization-scoped token with the same reach as an organization API key.';
 }
 
 function tokenRows(session) {
@@ -170,12 +195,29 @@ function tokenRows(session) {
     <tr><th>id_token</th><td class="mono">${tokens.id_token ? escape(truncate(tokens.id_token, 20)) : '— (organization tokens carry no id_token)'}</td></tr>`;
 }
 
+const checkList = (checks) => checks
+  .map((check) => `<li><span class="mark ${check.ok ? 'ok' : 'bad'}">${check.ok ? '✓' : '✕'}</span>
+      <span>${escape(check.label)} <span class="muted small mono">${escape(check.detail ?? '')}</span></span></li>`)
+  .join('');
+
 function idTokenCard(session) {
+  if (session.idTokenRejected) {
+    return `<section class="card">
+      <h2>id_token — rejected</h2>
+      <p class="muted">An <code>id_token</code> arrived but failed verification, so its claims were discarded rather than
+      believed. The access token from the same response is still in use.</p>
+      <ul class="checks">${checkList(session.idTokenRejected)}</ul>
+    </section>`;
+  }
+
   if (!session.idTokenClaims) {
     return `<section class="card">
       <h2>OpenID Connect</h2>
-      <p class="muted">No <code>id_token</code> was issued. An administrator connecting an organization authorizes the
-      <em>organization</em>, not a person, so there is nobody for Xyte to assert an identity for.</p>
+      <p class="muted">${OPENID_REQUESTED
+        ? `No <code>id_token</code> was issued. An administrator connecting an organization authorizes the
+           <em>organization</em>, not a person, so there is nobody for Xyte to assert an identity for.`
+        : `This app did not ask for the <code>openid</code> scope, so no <code>id_token</code> was issued — not even for a
+           member signing in. Add <code>openid</code> to <code>SCOPE</code> to see one.`}</p>
     </section>`;
   }
 
@@ -214,7 +256,6 @@ function userinfoCard(userinfoResult) {
 }
 
 export function dashboard({ session, probes, userinfoResult, flash }) {
-  const isMember = Boolean(session.idTokenClaims);
   const rows = probes
     .map((result) => `<tr>
         <td class="mono">${escape(result.path)}</td>
@@ -228,9 +269,7 @@ export function dashboard({ session, probes, userinfoResult, flash }) {
     body: `
       <section class="card banner">
         <h3>${escape(headline(session))}</h3>
-        <p>${isMember
-          ? `Tenant <code>${escape(session.idTokenClaims.xyte_tenant_id ?? '')}</code> (${escape(session.idTokenClaims.xyte_tenant_type ?? '')}). This token carries this member's own access — nothing more.`
-          : 'This app now holds an organization-scoped token with the same reach as an organization API key.'}</p>
+        <p>${subheading(session)}</p>
       </section>
       ${flashCard(flash)}
       <section class="card">
@@ -263,8 +302,9 @@ export function dashboard({ session, probes, userinfoResult, flash }) {
   });
 }
 
-// Shown instead of the dashboard when an id_token fails any check. The claims are deliberately not
-// rendered anywhere on this page: they have not been proven to come from Xyte.
+// Shown instead of the dashboard when an id_token fails any check. Only the individual values that a
+// check looked at are echoed — never the claim set presented as an identity, because nothing here has
+// been proven to come from Xyte.
 export function idTokenErrorPage(verified) {
   const checks = verified.checks
     .map((check) => `<li><span class="mark ${check.ok ? 'ok' : 'bad'}">${check.ok ? '✓' : '✕'}</span>
@@ -318,8 +358,9 @@ export function discoveryPage({ discovery, jwks }) {
       <section class="card">
         <h2>GET ${escape(discovery.jwks_uri ?? '/oauth/.well-known/jwks.json')}</h2>
         <pre>${escape(JSON.stringify(jwks, null, 2))}</pre>
-        <p class="muted small">These two documents are everything a client needs to find the endpoints and verify an
-        <code>id_token</code> signature. Nothing else about Xyte has to be hard-coded.</p>
+        <p class="muted small">These two documents are almost everything a client needs to find the endpoints and verify an
+        <code>id_token</code> signature. The one exception is the revocation endpoint, which Xyte does not advertise yet —
+        <code>src/oauth.js</code> builds that one from <code>XYTE_HUB</code>.</p>
       </section>
       <section class="card"><a class="btn" href="/">Back</a></section>`
   });

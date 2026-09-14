@@ -3,7 +3,8 @@ import { randomBytes } from 'node:crypto';
 const COOKIE = 'xyte_demo_sid';
 
 // In-memory only: restarting the demo signs everyone out, which is exactly what you want while
-// stepping through the flows. A real vendor app persists this server-side, per user, and expires it.
+// stepping through the flows. Nothing is ever evicted either — fine for a demo, but a real vendor app
+// persists this server-side, per user, with a TTL and a sweep.
 const sessions = new Map();
 
 function parseCookies(req) {
@@ -13,8 +14,10 @@ function parseCookies(req) {
       .map((part) => part.trim())
       .filter(Boolean)
       .map((part) => {
+        // No decodeURIComponent: the ids are base64url, and a malformed cookie would otherwise throw
+        // a URIError that turns every page into a 500.
         const at = part.indexOf('=');
-        return at === -1 ? [part, ''] : [part.slice(0, at), decodeURIComponent(part.slice(at + 1))];
+        return at === -1 ? [part, ''] : [part.slice(0, at), part.slice(at + 1)];
       })
   );
 }
