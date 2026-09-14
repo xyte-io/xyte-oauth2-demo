@@ -11,5 +11,6 @@
   "engines": {
     "node": ">=18.17"
   },
-  "license": "UNLICENSED"
+  "author": "Xyte Ltd.",
+  "license": "AGPL-3.0-only"
 }

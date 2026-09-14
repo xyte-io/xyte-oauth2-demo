@@ -107,6 +107,20 @@ server-side, encrypted and per user, expires its sessions, and serves the redire
 at which point the session cookie should also carry `Secure` and the `__Host-` prefix, which is what
 actually stops an attacker planting a cookie (see the note in `server.js` → `/login`).
 
+## Licence and intended use
+
+Copyright © 2026 Xyte Ltd. Licensed under the **GNU Affero General Public License v3.0** — see
+[LICENSE](LICENSE).
+
+This repository exists so you can **read, run and review** how a Xyte OAuth2 integration works. It is
+a teaching aid, not a starting point for a product, and the licence is chosen to say so: the AGPL
+requires anyone who distributes a derived work — or merely runs one as a network service — to release
+their own source under the same terms. Copying pieces of this into a closed-source portal is therefore
+not something the licence permits.
+
+Read it, borrow the ideas, check your own implementation against it. If you would like to reuse the
+code itself under different terms, contact Xyte — the copyright is ours to relicense.
+
 ## Files
 
 ```
