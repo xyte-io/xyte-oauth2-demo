@@ -31,7 +31,7 @@ const file = readDotenv(fileURLToPath(new URL('../.env', import.meta.url)));
 const read = (key, fallback) => process.env[key] ?? file[key] ?? fallback;
 
 export const config = {
-  hub: read('XYTE_HUB', 'http://localhost:3000').replace(/\/+$/, ''),
+  hub: read('XYTE_HUB', 'https://hub.xyte.io').replace(/\/+$/, ''),
   // Deliberately empty: a placeholder default would make the check below unreachable and leave a
   // forgotten .env to fail later as an opaque invalid_client from the hub.
   clientId: read('XYTE_CLIENT_ID', ''),

@@ -359,9 +359,8 @@ export function discoveryPage({ discovery, jwks }) {
       <section class="card">
         <h2>GET ${escape(discovery.jwks_uri ?? '/oauth/.well-known/jwks.json')}</h2>
         <pre>${escape(JSON.stringify(jwks, null, 2))}</pre>
-        <p class="muted small">These two documents are almost everything a client needs to find the endpoints and verify an
-        <code>id_token</code> signature. The one exception is the revocation endpoint, which Xyte does not advertise yet —
-        <code>src/oauth.js</code> builds that one from <code>XYTE_HUB</code>.</p>
+        <p class="muted small">These two documents are everything a client needs to find the endpoints and verify an
+        <code>id_token</code> signature.</p>
       </section>
       <section class="card"><a class="btn" href="/">Back</a></section>`
   });
