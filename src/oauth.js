@@ -47,7 +47,7 @@ function assertTrustworthy(document) {
   }
 
   const expected = new URL(config.hub).origin;
-  for (const key of ['authorization_endpoint', 'token_endpoint', 'userinfo_endpoint', 'jwks_uri']) {
+  for (const key of ['authorization_endpoint', 'token_endpoint', 'revocation_endpoint', 'userinfo_endpoint', 'jwks_uri']) {
     if (!document[key] || new URL(document[key]).origin !== expected) {
       throw new Error(`Discovery ${key} ("${document[key]}") is not on ${expected}`);
     }
@@ -142,10 +142,10 @@ export async function refreshTokens(refreshToken) {
   return postForm(endpoint, { grant_type: 'refresh_token', refresh_token: refreshToken });
 }
 
-// Built from XYTE_HUB rather than from discovery because Xyte does not advertise a
-// `revocation_endpoint` in its metadata yet.
 export async function revokeToken(token) {
-  return postForm(`${config.hub}/oauth/revoke`, { token });
+  const { revocation_endpoint: endpoint } = await discovery();
+
+  return postForm(endpoint, { token });
 }
 
 export async function userinfo(accessToken) {
