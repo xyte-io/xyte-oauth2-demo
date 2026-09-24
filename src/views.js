@@ -32,12 +32,6 @@ const STYLES = `
   .banner { border-left: 4px solid var(--accent); }
   .banner h3 { margin: 0 0 6px; font-size: 18px; }
   .banner p { margin: 0; color: var(--muted); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
-  .choice { display: block; background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-            padding: 20px; text-decoration: none; color: inherit; transition: border-color .15s, transform .15s; }
-  .choice:hover { border-color: var(--accent); transform: translateY(-1px); }
-  .choice strong { display: block; font-size: 17px; margin-bottom: 6px; }
-  .choice span { color: var(--muted); font-size: 14px; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -53,7 +47,7 @@ const STYLES = `
   button, .btn { font: inherit; font-size: 14px; padding: 9px 16px; border-radius: 8px; border: 1px solid var(--line);
                  background: var(--card); color: var(--ink); cursor: pointer; text-decoration: none; display: inline-block; }
   button:hover, .btn:hover { border-color: var(--accent); }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .muted { color: var(--muted); }
   .small { font-size: 13px; }
   ul.checks { list-style: none; padding: 0; margin: 0; }
@@ -126,15 +120,14 @@ export function landing({ session, problems, flash }) {
         one flow: Xyte authenticates you, you choose which organization this app should act on, and the app comes
         back holding both an identity for you and a token to call the API with.</p>
       </section>
-      <div class="grid">
-        <a class="choice" href="/login">
-          <strong>Sign in with Xyte</strong>
-          <span>Xyte lists every organization you can reach and marks each one: already approved by an administrator,
-          yours to approve, or waiting on an administrator. Whichever you pick, this app receives an OpenID Connect
-          <code>id_token</code> naming who signed in, plus an access token with the reach of an organization API key
-          &mdash; the same token for an administrator and for a member.</span>
-        </a>
-      </div>
+      <section class="card">
+        <h2>Sign in</h2>
+        <p>Xyte lists every organization you can reach and marks each one: already approved by an administrator,
+        yours to approve, or waiting on an administrator. Whichever you pick, this app receives an OpenID Connect
+        <code>id_token</code> naming who signed in, plus an access token with the reach of an organization API key
+        &mdash; the same token for an administrator and for a member.</p>
+        <p><a class="btn primary" href="/login">Sign in with Xyte</a></p>
+      </section>
       <section class="card">
         <h2>This client</h2>
         <table>
