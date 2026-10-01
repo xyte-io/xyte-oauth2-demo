@@ -97,6 +97,10 @@ const routes = {
   // state: what comes back depends on who signs in and what they pick, not on how the flow started,
   // and the dashboard says so by reading the token response rather than a local flag.
   'GET /login': async (req, res, session) => {
+    // A missing client id or a malformed XYTE_HUB would land the user on the hub's error page (or a
+    // 500) with no way back. The landing page already lists the problems, so send them there.
+    if (configProblems().length) return redirect(res, '/');
+
     const { verifier, challenge } = pkcePair();
 
     // Rotate before the one-time values are stored, so a session id that was visible to anyone

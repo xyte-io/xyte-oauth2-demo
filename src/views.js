@@ -48,6 +48,7 @@ const STYLES = `
                  background: var(--card); color: var(--ink); cursor: pointer; text-decoration: none; display: inline-block; }
   button:hover, .btn:hover { border-color: var(--accent); }
   button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
   .muted { color: var(--muted); }
   .small { font-size: 13px; }
   ul.checks { list-style: none; padding: 0; margin: 0; }
@@ -126,7 +127,9 @@ export function landing({ session, problems, flash }) {
         yours to approve, or waiting on an administrator. Whichever you pick, this app receives an OpenID Connect
         <code>id_token</code> naming who signed in, plus an access token with the reach of an organization API key
         &mdash; the same token for an administrator and for a member.</p>
-        <p><a class="btn primary" href="/login">Sign in with Xyte</a></p>
+        <p>${problems.length
+          ? '<button class="primary" disabled>Sign in with Xyte</button> <span class="muted small">Fix the configuration problems above first.</span>'
+          : '<a class="btn primary" href="/login">Sign in with Xyte</a>'}</p>
       </section>
       <section class="card">
         <h2>This client</h2>
