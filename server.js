@@ -127,6 +127,7 @@ const routes = {
     // callback is the one thing a client must never do.
     if (!expectedState || returnedState !== expectedState) {
       return send(res, 400, errorPage({
+        stage: 'state',
         error: 'state_mismatch',
         description: 'The state in the callback does not match the one this app generated. The response was discarded.',
         state: returnedState,
@@ -142,6 +143,7 @@ const routes = {
 
     if (error || !code) {
       return send(res, 200, errorPage({
+        stage: 'callback',
         error: error ?? 'invalid_response',
         description: error
           ? url.searchParams.get('error_description')
@@ -154,6 +156,7 @@ const routes = {
     const result = await exchangeCode({ code, verifier: codeVerifier });
     if (!result.ok || !result.body) {
       return send(res, 200, errorPage({
+        stage: 'token',
         error: result.body?.error ?? `http_${result.status}`,
         description: result.body?.error_description ?? result.raw ?? 'The token endpoint returned no usable body.',
         state: returnedState,

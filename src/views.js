@@ -328,13 +328,34 @@ export function idTokenErrorPage(verified) {
   });
 }
 
-export function errorPage({ error, description, state, expectedState }) {
+// Where the flow stopped. Each stage points at a different thing to fix, so the page names it rather
+// than sending someone with a wrong client secret off to debug the authorize redirect.
+const ERROR_STAGES = {
+  state: 'The callback reached this app, but its <code>state</code> is not the one this app generated, so it was discarded before anything else was read.',
+  callback: 'Xyte redirected back to this app with an error instead of a code.',
+  token: 'Xyte redirected back with a code, but exchanging it at the token endpoint failed.'
+};
+
+// One line per error code that has a likely local cause.
+const ERROR_HINTS = {
+  state_mismatch: 'Usually a sign-in started in another tab (only the latest one can finish), or a lost session cookie: this demo keeps sessions in memory, so restarting it drops them. Start over.',
+  access_denied: 'The sign-in was cancelled, or the organization approval was declined, on the Xyte side.',
+  invalid_scope: 'SCOPE asks for something other than openid, profile and email.',
+  invalid_request: 'Check that REDIRECT_URI matches the URI Xyte registered for this client byte for byte.',
+  unauthorized_client: 'The client id is not allowed to use this flow. Check XYTE_CLIENT_ID with Xyte.',
+  invalid_client: 'Client authentication failed. Check XYTE_CLIENT_SECRET and AUTH_METHOD (basic or post) against what Xyte issued.',
+  invalid_grant: 'The code expired, was already used, or REDIRECT_URI / the PKCE verifier did not match the authorize request. Start over.'
+};
+
+export function errorPage({ stage, error, description, state, expectedState }) {
+  const hint = ERROR_HINTS[error];
   return layout({
     title: `${config.appName} — authorization error`,
     body: `
       <section class="card banner">
         <h3>Authorization did not complete</h3>
-        <p>Xyte redirected back to this app with an error instead of a code.</p>
+        <p>${ERROR_STAGES[stage]}</p>
+        ${hint ? `<p>${escape(hint)}</p>` : ''}
       </section>
       <section class="card">
         <table>
