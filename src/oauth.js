@@ -142,10 +142,18 @@ export async function refreshTokens(refreshToken) {
   return postForm(endpoint, { grant_type: 'refresh_token', refresh_token: refreshToken });
 }
 
-export async function revokeToken(token) {
+// Revokes the session's grant. The refresh token is the one to present (RFC 7009 §2.1): the access
+// token lives an hour and the refresh token 90 days, and an expired access token is a token the hub
+// no longer recognises, so revoking it after an hour idle kills nothing and leaves the refresh token
+// alive. Presenting the refresh token makes Xyte revoke the access tokens issued with it as well.
+// The access token is the fallback only for a response that carried no refresh token.
+export async function revokeToken(tokens) {
   const { revocation_endpoint: endpoint } = await discovery();
+  const [token, hint] = tokens.refresh_token
+    ? [tokens.refresh_token, 'refresh_token']
+    : [tokens.access_token, 'access_token'];
 
-  return postForm(endpoint, { token });
+  return postForm(endpoint, { token, token_type_hint: hint });
 }
 
 export async function userinfo(accessToken) {

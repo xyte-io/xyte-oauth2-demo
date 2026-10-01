@@ -237,7 +237,14 @@ const routes = {
   'POST /revoke': async (req, res, session) => {
     if (!session.tokens?.access_token) return redirect(res, '/');
 
-    const result = await revokeToken(session.tokens.access_token);
+    const result = await revokeToken(session.tokens);
+    // A 400, a 401 invalid_client, a 429 or a 5xx means nothing was revoked — say so rather than
+    // reporting dead tokens that are still alive.
+    if (!result.ok) {
+      session.flash = { trustedHtml: `Revocation failed: ${tokenError(result)}. The tokens this app holds are still live.` };
+      return redirect(res, '/dashboard');
+    }
+
     session.flash = {
       trustedHtml: `<code>POST /oauth/revoke</code> answered HTTP ${result.status} with an empty body — RFC 7009 says a revocation
              endpoint must not reveal whether the token existed. Both tokens this app was holding are dead, so the probes
@@ -252,13 +259,23 @@ const routes = {
   'POST /logout': async (req, res, session) => {
     // What a real application does on sign-out: drop its own session AND hand the tokens back, so no
     // live credential outlives the session that needed it. Revoking first — clearSession drops the tokens.
-    const revoked = session.tokens?.access_token ? await revokeToken(session.tokens.access_token) : null;
+    // A failed revoke (discovery down, hub unreachable, an error status) must not keep the user signed
+    // in: the local session is cleared either way, and the message says whether the revoke went through.
+    const hadTokens = Boolean(session.tokens);
+    let revoked = false;
+    if (hadTokens) {
+      try {
+        revoked = (await revokeToken(session.tokens)).ok;
+      } catch {
+        // `revoked` stays false; the message below reports it.
+      }
+    }
 
     clearSession(session);
     // Rotate on sign-out too, so the id that was tied to an identity cannot be presented again.
     rotateSession(session, res);
     session.flash = {
-      trustedHtml: `Signed out of this demo${revoked ? ', and the tokens it was holding were revoked at Xyte' : ''}. The
+      trustedHtml: `Signed out of this demo${revoked ? ', and the tokens it was holding were revoked at Xyte' : hadTokens ? ', but revoking its tokens at Xyte failed, so they stay live until they expire' : ''}. The
              organization's approval is untouched — that is the customer's to withdraw, in Xyte under
              Settings → Connected apps.`
     };
