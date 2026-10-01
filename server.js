@@ -308,9 +308,14 @@ const server = createServer(async (req, res) => {
     // A handler that already started its response cannot be given an error page on top of it.
     if (res.headersSent) return res.end();
 
+    // fetch() reports every network failure as a bare "TypeError: fetch failed"; the actual reason
+    // (ENOTFOUND, ECONNREFUSED, ...) is on error.cause.
+    const cause = error.cause?.code ?? error.cause?.message;
     send(res, 500, layout({
       title: 'Error',
-      body: `<section class="card"><h2>Something went wrong</h2><pre>${escape(error.stack ?? error.message)}</pre>
+      body: `<section class="card"><h2>Something went wrong</h2>
+             ${cause ? `<p>Cause: <code>${escape(cause)}</code> while talking to <code>${escape(config.hub)}</code>.</p>` : ''}
+             <pre>${escape(error.stack ?? error.message)}</pre>
              <p class="muted small">If this is a connection or discovery error, check that <code>XYTE_HUB</code> points at a
              reachable hub and that its <code>issuer</code> matches that URL exactly.</p>
              <a class="btn" href="/">Back</a></section>`
