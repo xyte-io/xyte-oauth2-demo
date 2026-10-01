@@ -97,6 +97,10 @@ const routes = {
   // state: what comes back depends on who signs in and what they pick, not on how the flow started,
   // and the dashboard says so by reading the token response rather than a local flag.
   'GET /login': async (req, res, session) => {
+    // A missing client id or a malformed XYTE_HUB would land the user on the hub's error page (or a
+    // 500) with no way back. The landing page already lists the problems, so send them there.
+    if (configProblems().length) return redirect(res, '/');
+
     const { verifier, challenge } = pkcePair();
 
     // Rotate before the one-time values are stored, so a session id that was visible to anyone
@@ -127,6 +131,7 @@ const routes = {
     // callback is the one thing a client must never do.
     if (!expectedState || returnedState !== expectedState) {
       return send(res, 400, errorPage({
+        stage: 'state',
         error: 'state_mismatch',
         description: 'The state in the callback does not match the one this app generated. The response was discarded.',
         state: returnedState,
@@ -142,6 +147,7 @@ const routes = {
 
     if (error || !code) {
       return send(res, 200, errorPage({
+        stage: 'callback',
         error: error ?? 'invalid_response',
         description: error
           ? url.searchParams.get('error_description')
@@ -154,6 +160,7 @@ const routes = {
     const result = await exchangeCode({ code, verifier: codeVerifier });
     if (!result.ok || !result.body) {
       return send(res, 200, errorPage({
+        stage: 'token',
         error: result.body?.error ?? `http_${result.status}`,
         description: result.body?.error_description ?? result.raw ?? 'The token endpoint returned no usable body.',
         state: returnedState,
@@ -237,7 +244,14 @@ const routes = {
   'POST /revoke': async (req, res, session) => {
     if (!session.tokens?.access_token) return redirect(res, '/');
 
-    const result = await revokeToken(session.tokens.access_token);
+    const result = await revokeToken(session.tokens);
+    // A 400, a 401 invalid_client, a 429 or a 5xx means nothing was revoked — say so rather than
+    // reporting dead tokens that are still alive.
+    if (!result.ok) {
+      session.flash = { trustedHtml: `Revocation failed: ${tokenError(result)}. The tokens this app holds are still live.` };
+      return redirect(res, '/dashboard');
+    }
+
     session.flash = {
       trustedHtml: `<code>POST /oauth/revoke</code> answered HTTP ${result.status} with an empty body — RFC 7009 says a revocation
              endpoint must not reveal whether the token existed. Both tokens this app was holding are dead, so the probes
@@ -252,13 +266,23 @@ const routes = {
   'POST /logout': async (req, res, session) => {
     // What a real application does on sign-out: drop its own session AND hand the tokens back, so no
     // live credential outlives the session that needed it. Revoking first — clearSession drops the tokens.
-    const revoked = session.tokens?.access_token ? await revokeToken(session.tokens.access_token) : null;
+    // A failed revoke (discovery down, hub unreachable, an error status) must not keep the user signed
+    // in: the local session is cleared either way, and the message says whether the revoke went through.
+    const hadTokens = Boolean(session.tokens);
+    let revoked = false;
+    if (hadTokens) {
+      try {
+        revoked = (await revokeToken(session.tokens)).ok;
+      } catch {
+        // `revoked` stays false; the message below reports it.
+      }
+    }
 
     clearSession(session);
     // Rotate on sign-out too, so the id that was tied to an identity cannot be presented again.
     rotateSession(session, res);
     session.flash = {
-      trustedHtml: `Signed out of this demo${revoked ? ', and the tokens it was holding were revoked at Xyte' : ''}. The
+      trustedHtml: `Signed out of this demo${revoked ? ', and the tokens it was holding were revoked at Xyte' : hadTokens ? ', but revoking its tokens at Xyte failed, so they stay live until they expire' : ''}. The
              organization's approval is untouched — that is the customer's to withdraw, in Xyte under
              Settings → Connected apps.`
     };
@@ -284,9 +308,14 @@ const server = createServer(async (req, res) => {
     // A handler that already started its response cannot be given an error page on top of it.
     if (res.headersSent) return res.end();
 
+    // fetch() reports every network failure as a bare "TypeError: fetch failed"; the actual reason
+    // (ENOTFOUND, ECONNREFUSED, ...) is on error.cause.
+    const cause = error.cause?.code ?? error.cause?.message;
     send(res, 500, layout({
       title: 'Error',
-      body: `<section class="card"><h2>Something went wrong</h2><pre>${escape(error.stack ?? error.message)}</pre>
+      body: `<section class="card"><h2>Something went wrong</h2>
+             ${cause ? `<p>Cause: <code>${escape(cause)}</code> while talking to <code>${escape(config.hub)}</code>.</p>` : ''}
+             <pre>${escape(error.stack ?? error.message)}</pre>
              <p class="muted small">If this is a connection or discovery error, check that <code>XYTE_HUB</code> points at a
              reachable hub and that its <code>issuer</code> matches that URL exactly.</p>
              <a class="btn" href="/">Back</a></section>`
