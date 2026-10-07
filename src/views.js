@@ -48,6 +48,7 @@ const STYLES = `
                  background: var(--card); color: var(--ink); cursor: pointer; text-decoration: none; display: inline-block; }
   button:hover, .btn:hover { border-color: var(--accent); }
   button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
   .muted { color: var(--muted); }
   .small { font-size: 13px; }
   ul.checks { list-style: none; padding: 0; margin: 0; }
@@ -126,7 +127,9 @@ export function landing({ session, problems, flash }) {
         yours to approve, or waiting on an administrator. Whichever you pick, this app receives an OpenID Connect
         <code>id_token</code> naming who signed in, plus an access token with the reach of an organization API key
         &mdash; the same token for an administrator and for a member.</p>
-        <p><a class="btn primary" href="/login">Sign in with Xyte</a></p>
+        <p>${problems.length
+          ? '<button class="primary" disabled>Sign in with Xyte</button> <span class="muted small">Fix the configuration problems above first.</span>'
+          : '<a class="btn primary" href="/login">Sign in with Xyte</a>'}</p>
       </section>
       <section class="card">
         <h2>This client</h2>
@@ -328,13 +331,34 @@ export function idTokenErrorPage(verified) {
   });
 }
 
-export function errorPage({ error, description, state, expectedState }) {
+// Where the flow stopped. Each stage points at a different thing to fix, so the page names it rather
+// than sending someone with a wrong client secret off to debug the authorize redirect.
+const ERROR_STAGES = {
+  state: 'The callback reached this app, but its <code>state</code> is not the one this app generated, so it was discarded before anything else was read.',
+  callback: 'Xyte redirected back to this app with an error instead of a code.',
+  token: 'Xyte redirected back with a code, but exchanging it at the token endpoint failed.'
+};
+
+// One line per error code that has a likely local cause.
+const ERROR_HINTS = {
+  state_mismatch: 'Usually a sign-in started in another tab (only the latest one can finish), or a lost session cookie: this demo keeps sessions in memory, so restarting it drops them. Start over.',
+  access_denied: 'The sign-in was cancelled, or the organization approval was declined, on the Xyte side.',
+  invalid_scope: 'SCOPE asks for something other than openid, profile and email.',
+  invalid_request: 'Check that REDIRECT_URI matches the URI Xyte registered for this client byte for byte.',
+  unauthorized_client: 'The client id is not allowed to use this flow. Check XYTE_CLIENT_ID with Xyte.',
+  invalid_client: 'Client authentication failed. Check XYTE_CLIENT_SECRET and AUTH_METHOD (basic or post) against what Xyte issued.',
+  invalid_grant: 'The code expired, was already used, or REDIRECT_URI / the PKCE verifier did not match the authorize request. Start over.'
+};
+
+export function errorPage({ stage, error, description, state, expectedState }) {
+  const hint = ERROR_HINTS[error];
   return layout({
     title: `${config.appName} — authorization error`,
     body: `
       <section class="card banner">
         <h3>Authorization did not complete</h3>
-        <p>Xyte redirected back to this app with an error instead of a code.</p>
+        <p>${ERROR_STAGES[stage]}</p>
+        ${hint ? `<p>${escape(hint)}</p>` : ''}
       </section>
       <section class="card">
         <table>
@@ -359,9 +383,8 @@ export function discoveryPage({ discovery, jwks }) {
       <section class="card">
         <h2>GET ${escape(discovery.jwks_uri ?? '/oauth/.well-known/jwks.json')}</h2>
         <pre>${escape(JSON.stringify(jwks, null, 2))}</pre>
-        <p class="muted small">These two documents are almost everything a client needs to find the endpoints and verify an
-        <code>id_token</code> signature. The one exception is the revocation endpoint, which Xyte does not advertise yet —
-        <code>src/oauth.js</code> builds that one from <code>XYTE_HUB</code>.</p>
+        <p class="muted small">These two documents are everything a client needs to find the endpoints and verify an
+        <code>id_token</code> signature.</p>
       </section>
       <section class="card"><a class="btn" href="/">Back</a></section>`
   });

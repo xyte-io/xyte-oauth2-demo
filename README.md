@@ -51,7 +51,7 @@ Every value can come from `.env` or from a real environment variable (the enviro
 
 | Variable | Default | Notes |
 |---|---|---|
-| `XYTE_HUB` | `http://localhost:3000` | Base URL, no trailing slash. Production: `https://hub.xyte.io` |
+| `XYTE_HUB` | `https://hub.xyte.io` | Base URL, no trailing slash |
 | `XYTE_CLIENT_ID` | *(none — required)* | Issued by Xyte |
 | `XYTE_CLIENT_SECRET` | *(none — required)* | Issued by Xyte |
 | `REDIRECT_URI` | `http://localhost:5555/callback` | Must match a registered URI **byte for byte** |
@@ -71,9 +71,8 @@ redirect URIs. There is no dynamic client registration.
   `/oauth/userinfo` response, and five Organization Core API calls with their status codes. Signing in
   to different organizations, and as different people, and comparing this table is the fastest way to
   see that the token's reach never depends on who signed in.
-- **`/discovery`** — `/.well-known/openid-configuration` and the JWKS, which is nearly everything a
-  client needs to discover Xyte. The exception is the revocation endpoint: Xyte does not advertise a
-  `revocation_endpoint` yet, so that one URL is built from `XYTE_HUB`.
+- **`/discovery`** — `/.well-known/openid-configuration` and the JWKS, which is everything a
+  client needs to discover Xyte, including the `revocation_endpoint`.
 - Buttons for **refresh**, **replaying a rotated refresh token**, **revoking the tokens this app
   holds**, and **signing out** (which revokes them too, the way a real application should), each
   explaining what Xyte did in response. Revoking tokens is not a disconnect: the organization stays
